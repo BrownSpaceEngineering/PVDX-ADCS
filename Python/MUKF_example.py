@@ -18,7 +18,7 @@ Overall Idea of a UKF:
 - Given a timestep, a measurement, and our last state, we take some informed samples around our estimated state to guess where we are(what our current state is)
 '''
 
-global_Q = np.eye(6)*0.1
+global_Q = np.eye(6)*0.0001
 global_R = np.eye(6)*0.001
 dt = 0.1
 timeframe = datetime.now()
@@ -75,7 +75,7 @@ def gradient_descent(Y : List[Quaternion], x : Quaternion):
         if(np.linalg.norm(ave) < 0.001):
             break
         average_error_quat = rotation_to_quat(ave)
-        x = x * average_error_quat   # formula 55
+        x = average_error_quat * x    # formula 55
         
     return x, error_vectors
 
@@ -121,6 +121,7 @@ def error_sigmas_to_quat_sigmas(error_sigmas, rotation : Quaternion):
     for sigma in error_sigmas:
         quat_rot = rotation_to_quat(sigma[:3])
         new_quat_rot = rotation * quat_rot
+        new_quat_rot = new_quat_rot.normalised
         quat_sigmas.append(np.concatenate([new_quat_rot.elements, sigma[3:]]))
     return np.array(quat_sigmas)
 
@@ -133,6 +134,7 @@ def propagate_quat_sigmas(quat_sigmas):
         quaternion = sigma[:4]
         w = sigma[4:7]
         new_quaternion = Quaternion(quaternion)*rotation_to_quat(w * dt)
+        new_quaternion = new_quaternion.normalised
         new_sigmas.append(np.concatenate([new_quaternion.elements, w]))
     return np.array(new_sigmas)
 
@@ -210,16 +212,16 @@ def iterate(error_state, rotation : Quaternion, P, obs):
     P = P_hat - k@P_vv@k.T
 
     x_hat_rot = rotation_to_quat(x_hat[:3])
-    return x_hat, average_quaternion * x_hat_rot, P
+    return x_hat, x_hat_rot * average_quaternion, P
 
 
 if __name__ == '__main__':
-    true_rot = Quaternion([1,0.2,0.2,0.2]).normalised
-    rot = Quaternion([1,0.22,0.21,0.19]).normalised
+    true_rot = Quaternion([1,1,1,1]).normalised
+    rot = Quaternion([1,1.1,0.9,1]).normalised
     P = np.eye(6)
     state = np.zeros(6)
-    rotation_quaternion = Quaternion(scalar = 0, vector = [0.000,0.005,0.005])
-    for i in range(300):
+    rotation_quaternion = Quaternion(scalar = 0, vector = [0.01, 0.002, 0.01])
+    for i in range(1000):
         derivative_true_rot = 1/2 * true_rot * rotation_quaternion
         true_rot = (true_rot + dt * derivative_true_rot).normalised#from body to reference
         ref_to_body = true_rot.inverse
@@ -229,8 +231,9 @@ if __name__ == '__main__':
         given_reading_one = given_reading_one / np.linalg.norm(given_reading_one)
         given_reading_two = given_reading_two / np.linalg.norm(given_reading_two)
         measurement = np.concatenate((given_reading_one, given_reading_two))
-        # measurement = true_rot.elements
-        
+
+        if(i % 100 == 0):
+            print(quat_diff(rot, true_rot))
         try:
             state, rot, P = iterate(state, rot, P, measurement)
             state[:3] = np.zeros(3)#we need to reset our error vector here, as we already tacked on the error vector to the rotation at the end of the last state! 
@@ -238,6 +241,6 @@ if __name__ == '__main__':
             print(i)
             print(e)
             break
-    print(state)
     print(rot)
     print(true_rot)
+    print(quat_diff(rot, true_rot))

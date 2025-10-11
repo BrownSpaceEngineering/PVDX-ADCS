@@ -20,13 +20,14 @@ Overall Idea of a UKF:
 
 global_Q = np.eye(6)*0.0001
 global_R = np.eye(6)*0.001
-dt = 0.1
+dt = 0.2
 timeframe = datetime.now()
 kepler_posn = np.array([7e6, math.radians(0.05), math.radians(50), math.radians(311.6218), math.radians(199.2431), math.radians(48.4420)])
 xyz_posn = kep_to_cart(kepler_posn)[:3]
 magnetosphere_measurements = []
 magnetometer_readings = []
 
+gyro_measurement = [0,0,0]
 
 magnetosphere_measurements = []
 
@@ -96,7 +97,9 @@ def get_sigma_points(lam, x, P):
     Derived from Van Der Merwe Scaled(Weighted) Sigma Points
     '''
     n = x.shape[0]
-    U =cholesky((lam + n)*P)
+    P = (P + P.T) / 2
+    P += np.eye(n) * 1e-10
+    U =cholesky((lam + n)*P).T
     sigmas = [x]
     for k in range(1, n + 1, 1):#from 1 -> n
         idx = k - 1
@@ -129,13 +132,14 @@ def propagate_quat_sigmas(quat_sigmas):
     '''
     Propagates the 7-element sigma points forward a timestep so that we can guess
     '''
+    global gyro_measurement
     new_sigmas = []
     for sigma in quat_sigmas:
         quaternion = sigma[:4]
-        w = sigma[4:7]
+        w = sigma[4:7] + gyro_measurement
         new_quaternion = Quaternion(quaternion)*rotation_to_quat(w * dt)
         new_quaternion = new_quaternion.normalised
-        new_sigmas.append(np.concatenate([new_quaternion.elements, w]))
+        new_sigmas.append(np.concatenate([new_quaternion.elements, sigma[4:7]]))
     return np.array(new_sigmas)
 
 def get_measurements(quat_sigmas):
@@ -155,14 +159,27 @@ def get_measurements(quat_sigmas):
         measurements.append(np.concatenate((expected_reading_one, expected_reading_two)))
         #measurements.append(quat.elements)
     return np.array(measurements)
+
+def ensure_positive_definite(P, epsilon=1e-9):
+    """Ensure matrix is positive definite"""
+    P = (P + P.T) / 2  # Symmetrize
+    
+    # Check eigenvalues
+    eigvals = np.linalg.eigvalsh(P)
+    if np.min(eigvals) < epsilon:
+        P += np.eye(P.shape[0]) * (epsilon - np.min(eigvals) + epsilon)
+    
+    return P
+
 def iterate(error_state, rotation : Quaternion, P, obs):
     '''
     Iterates forward given our last 6-element state & covariance, our last rotation, and a measurement
     '''
     global global_Q, global_R
     n = error_state.shape[0]
-    alpha = 1e-5
+    alpha = 1e-4
     beta = 2
+    P = ensure_positive_definite(P)
     lam = calculate_lambda(alpha, error_state)
     sigmas = get_sigma_points(lam, error_state, P + global_Q)
     quat_sigmas = error_sigmas_to_quat_sigmas(sigmas, rotation)
@@ -209,25 +226,41 @@ def iterate(error_state, rotation : Quaternion, P, obs):
     P_vv = P_zz + global_R
     k = P_xz @ np.linalg.inv(P_vv)
     x_hat = mean_error + k@(obs - mean_measurement)
-    P = P_hat - k@P_vv@k.T
+
+    I_KH = np.eye(n) - k @ np.linalg.inv(P_vv) @ P_xz.T
+    P = I_KH @ P_hat @ I_KH.T + k @ global_R @ k.T
+    P = ensure_positive_definite(P)
 
     x_hat_rot = rotation_to_quat(x_hat[:3])
     return x_hat, x_hat_rot * average_quaternion, P
 
 
 if __name__ == '__main__':
-    true_rot = Quaternion([1,1,1,1]).normalised
-    rot = Quaternion([1,1.1,0.9,1]).normalised
-    P = np.eye(6)
+    true_rot = Quaternion(np.random.normal(loc = 0.5, scale = 0.5, size = 4)).normalised
+    rot = true_rot.elements + np.random.normal(loc = 0, scale = 0.4, size = 4)
+    rot = Quaternion(rot).normalised
+    P = np.eye(6) * 0.001
     state = np.zeros(6)
-    rotation_quaternion = Quaternion(scalar = 0, vector = [0.01, 0.002, 0.01])
+
+    true_angular_velocity = [0.3, -0.3, 0.25]#30 degrees per second, which is too fast for us but is good for simulation purposes
+    gyro_bias = [0.005, -0.005, 0.005]
+
+    #with a simulated u vector
+    state[3:] = np.array(true_angular_velocity) + np.array(gyro_bias)
+    rotation_quaternion = Quaternion(scalar = 0, vector = true_angular_velocity)
     for i in range(1000):
+        #with gyro
+        #gyro_measurement = true_angular_velocity + np.random.normal(loc = gyro_bias, scale = 0.03)
+        
+        #without gyro
+        gyro_measurement = [0,0,0]
+        
         derivative_true_rot = 1/2 * true_rot * rotation_quaternion
         true_rot = (true_rot + dt * derivative_true_rot).normalised#from body to reference
         ref_to_body = true_rot.inverse
 
-        given_reading_one = rotate(np.array([1,0,0]) + np.random.normal(loc = 0, scale = 0.01, size = 3), ref_to_body)
-        given_reading_two = rotate(np.array([0, 1,0]) + np.random.normal(loc = 0, scale = 0.01, size = 3), ref_to_body)
+        given_reading_one = rotate(np.array([1,0,0]) + np.random.normal(loc = 0, scale = 0.07, size = 3), ref_to_body)
+        given_reading_two = rotate(np.array([0, 1,0]) + np.random.normal(loc = 0, scale = 0.07, size = 3), ref_to_body)
         given_reading_one = given_reading_one / np.linalg.norm(given_reading_one)
         given_reading_two = given_reading_two / np.linalg.norm(given_reading_two)
         measurement = np.concatenate((given_reading_one, given_reading_two))
@@ -238,9 +271,10 @@ if __name__ == '__main__':
             state, rot, P = iterate(state, rot, P, measurement)
             state[:3] = np.zeros(3)#we need to reset our error vector here, as we already tacked on the error vector to the rotation at the end of the last state! 
         except Exception as e:
-            print(i)
+            print(np.linalg.eigvals(P))
             print(e)
             break
-    print(rot)
-    print(true_rot)
-    print(quat_diff(rot, true_rot))
+    print(state)
+    # print(rot)
+    # print(true_rot)
+    # print(quat_diff(rot, true_rot))

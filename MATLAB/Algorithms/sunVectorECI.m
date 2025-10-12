@@ -1,3 +1,4 @@
+% Last edited 10/12/25 1:42 PM
 function [sun_x, sun_y, sun_z] = sunVectorECI(currentUTC)
     % currentUTC is treated as JD
     julianDate = currentUTC;

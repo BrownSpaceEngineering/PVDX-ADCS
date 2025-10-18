@@ -1,29 +1,26 @@
-%Use Kepler's equaition, solve iteratively with Newton's Method
+%SOURCE: https://www.hlevkin.com/hlevkin/90MathPhysBioBooks/Mechanics/Curtis_OrbitamMechForEngineeringStudents.pdf
 
-%ASSUMPTIONS: acceleration is fully determined by Earth's gravity, and thus
-%orbit remain keplerian. We could alternatively account for atomospheric
-%drag and other forces, and then use RK4 integration, but I believe this is
-%sufficient for our needs. 
+%Use Kepler's equation, solve iteratively with Newton's Method
 
-function [new_semi_major_axis, new_eccentricity, new_inclination, new_ascending_node, new_periapsis, new_true_anomaly] = propogateOrbit (semi_major_axis, eccentricity, inclination, ascending_node, periapsis, true_anomaly, time_delta)
+%UNITS:
+    %a: meters
+    %true anomaly: radians
+    %Time delta: seconds
+    
+
+function [new_semi_major_axis, new_eccentricity, new_inclination, new_ascending_node, new_periapsis, new_true_anomaly] = propogateOrbitalElements (semi_major_axis, eccentricity, inclination, ascending_node, periapsis, true_anomaly, time_delta)
 
 %Mass of earth is extremely larger than the sattelite, so:
 
 %gravitational  [m^3/s^2]
 u = 3.986004418e14; 
-i = inclination;
 a = semi_major_axis; %[m]
 e = eccentricity; 
 f = true_anomaly; %[radians]
 dt = time_delta; %[seconds]
 
-%make sure it's elliptical
-if e < 0 || e >= 1
-    error('This function currently supports only 0 <= eccentricity < 1 (elliptic).');
-end
-
 %convert true anomaly to eccentric anamoly
-E =  2 * atan2( sqrt((1 - e) * sin(f/2), sqrt(1 + e)) * cos(f/2));
+E =  2 * atan2( sqrt(1 - e) * sin(f/2), sqrt(1 + e) * cos(f/2));
 
 %Get current true anomaly from Kepler's equation
 M = E - e * sin(E);
@@ -64,5 +61,10 @@ new_periapsis = periapsis;
 new_true_anomaly = 2 * atan2( sqrt(1 + e) * sin(E_current/2), sqrt(1 - e) * cos(E_current/2));
 
 end
+
+%test 
+[semi_major_axis, eccentricity, inclination, ascending_node, periapsis, true_anomaly] = propogateOrbitalElements((9600e3 + 21000e3)/2, 0.37255, 0, 0, 0, 0, 10800)
+
+%correct output of 3.3371 radians
 
 

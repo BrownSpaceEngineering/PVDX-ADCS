@@ -1,9 +1,5 @@
-<<<<<<< Updated upstream
-% Last edited 10/12/25 1:42 PM
+% Last edited 10/19/25 10:40 PM
 function [sun_x, sun_y, sun_z] = sunVectorECI(currentUTC)
-=======
-function [sun_x, sun_y, sun_z] = sunVectorECIScript(currentUTC)
->>>>>>> Stashed changes
     % currentUTC is treated as JD
     julianDate = currentUTC;
    

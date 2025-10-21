@@ -1,8 +1,9 @@
-function [eci_x, eci_y, eci_z] = orbitalToECI(smAxis, eccentricity, inclination, aNodeLongitude, periapsisArg, trueAnomaly)
+function [eci_x, eci_y, eci_z, eci_vx, eci_vy, eci_vz] = orbitalToECI(smAxis, eccentricity, inclination, aNodeLongitude, periapsisArg, trueAnomaly)
     % Converts the 6 orbital elements into ECI position vector
     % 
     % All angles must be in radians
     % Units are consistent between semi-major axis and the resultant vector
+    % Now position in km, velocity in km/s
     
     % r0 is the current radius in the perifocal frame (plane of orbit)
     % since the orbit is not purely circular, it gives the current distance
@@ -12,6 +13,16 @@ function [eci_x, eci_y, eci_z] = orbitalToECI(smAxis, eccentricity, inclination,
     % Adjusted for the offset of the true anomaly
     % Axes: periapsis, 90 deg, normal
     r1 = [r0*cos(trueAnomaly); r0*sin(trueAnomaly); 0];
+    
+    % Earth's gravitational parameter [km^3/s^2]
+    gravConst = 398600.4418; 
+    % specific angular momentum
+    h = sqrt(gravConst * smAxis * (1 - eccentricity^2));
+    
+    % v1 is the velocity in the perifocal frame
+    v1 = [-gravConst/h * sin(trueAnomaly);
+           gravConst/h * (eccentricity + cos(trueAnomaly));
+           0];
 
     % Setup for unit quaternions z and x (to rotate around axis)
     qZ = @(theta) [cos(theta/2); 0; 0; sin(theta/2)];
@@ -27,8 +38,9 @@ function [eci_x, eci_y, eci_z] = orbitalToECI(smAxis, eccentricity, inclination,
     % Combine quaternions (Hamilton convention)
     qComb = qMult(qLongitude, qMult(qInclination, qPeriapsisArg));
     
-    % Rotate perifocal position with final quaternion to ECI
+    % Rotate perifocal position and velocity with final quaternion to ECI
     [eci_x, eci_y, eci_z] = rotateVectorByQuat(r1, qComb);
+    [eci_vx, eci_vy, eci_vz] = rotateVectorByQuat(v1, qComb);
 end
 
 function qOutput = qMult(q1, q2)
@@ -43,7 +55,6 @@ function qOutput = qMult(q1, q2)
     
     qOutput = [w; x; y; z];
 end
-
 
 function [vX, vY, vZ] = rotateVectorByQuat(v, q)
     % Rotate vector using unit quaternion
@@ -61,5 +72,11 @@ function [vX, vY, vZ] = rotateVectorByQuat(v, q)
     [vX, vY, vZ] = deal(vRotQ(2), vRotQ(3), vRotQ(4));
 end
 
-% Test orbital
-%[x,y,z] = orbitalToECI(7000, 0, 1, 0, 0, pi/2);
+% Example:
+% test_vector = [7000, 0.01, 1, 0.6, 0.2, pi/2];
+% [x,y,z,vx,vy,vz] = orbitalToECIScript(test_vector(1), test_vector(2), test_vector(3), test_vector(4), test_vector(5), test_vector(6));
+% disp([x, y, z]);    % Position in km
+% disp([vx, vy, vz]); % Velocity in km/s
+%
+% Please use the following for comparison:
+% https://elainecoe.github.io/orbital-mechanics-calculator/calculator.html

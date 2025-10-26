@@ -1,3 +1,4 @@
+% Last edited 10/26/25 11:55 AM
 function [eci_x, eci_y, eci_z, eci_vx, eci_vy, eci_vz] = orbitalToECI(smAxis, eccentricity, inclination, aNodeLongitude, periapsisArg, trueAnomaly)
     % Converts the 6 orbital elements into ECI position vector
     % 
@@ -27,7 +28,7 @@ function [eci_x, eci_y, eci_z, eci_vx, eci_vy, eci_vz] = orbitalToECI(smAxis, ec
     % Setup for unit quaternions z and x (to rotate around axis)
     qZ = @(theta) [cos(theta/2); 0; 0; sin(theta/2)];
     qX = @(theta) [cos(theta/2); sin(theta/2); 0; 0];
-    
+
     % qPeriapsisArg to orientate the x-axis at the orbital angle
     qPeriapsisArg = qZ(periapsisArg);
     % qInclination to tilt the plane relative to the equator
@@ -72,11 +73,49 @@ function [vX, vY, vZ] = rotateVectorByQuat(v, q)
     [vX, vY, vZ] = deal(vRotQ(2), vRotQ(3), vRotQ(4));
 end
 
-% Example:
-% test_vector = [7000, 0.01, 1, 0.6, 0.2, pi/2];
-% [x,y,z,vx,vy,vz] = orbitalToECIScript(test_vector(1), test_vector(2), test_vector(3), test_vector(4), test_vector(5), test_vector(6));
-% disp([x, y, z]);    % Position in km
-% disp([vx, vy, vz]); % Velocity in km/s
+% Example Test:
+% a_km = 7000;
+% ecc = 0.01;
+% inc_rad = 1.1;
+% raan_rad = 0.3;
+% argp_rad = 0.3;
+% nu_rad = 0.7;
 %
-% Please use the following for comparison:
-% https://elainecoe.github.io/orbital-mechanics-calculator/calculator.html
+% Convert for keplerian2ijk 
+% a_m = a_km * 1000;                  % km -> m
+% inc_deg = rad2deg(inc_rad);         % rad -> deg
+% raan_deg = rad2deg(raan_rad);
+% argp_deg = rad2deg(argp_rad);
+% nu_deg = rad2deg(nu_rad);
+%
+% Compute ECI using keplerian2ijk
+% [rECI1_m, vECI1_ms] = keplerian2ijk(a_m, ecc, inc_deg, raan_deg, argp_deg, nu_deg);
+%
+% Convert keplerian2ijk outputs to km and km/s for comparison
+% rECI1 = rECI1_m / 1000;      % m -> km
+% vECI1 = vECI1_ms / 1000;     % m/s -> km/s
+%
+% Compute ECI using the quaternion script
+% [x, y, z, vx, vy, vz] = orbitalToECIScript(a_km, ecc, inc_rad, raan_rad, argp_rad, nu_rad);
+% rECI2 = [x, y, z];           % km
+% vECI2 = [vx, vy, vz];        % km/s
+%
+% Print components individually 
+% fprintf('rECI1: x = %.6f km, y = %.6f km, z = %.6f km\n', rECI1(1), rECI1(2), rECI1(3));
+% fprintf('rECI2: x = %.6f km, y = %.6f km, z = %.6f km\n', rECI2(1), rECI2(2), rECI2(3));
+%
+% fprintf('vECI1: vx = %.6f km/s, vy = %.6f km/s, vz = %.6f km/s\n', vECI1(1), vECI1(2), vECI1(3));
+% fprintf('vECI2: vx = %.6f km/s, vy = %.6f km/s, vz = %.6f km/s\n', vECI2(1), vECI2(2), vECI2(3));
+
+% Print differences 
+% fprintf('Position difference (ECI2 - ECI1): x = %.6f km, y = %.6f km, z = %.6f km\n', ...
+%        rECI2(1)-rECI1(1), rECI2(2)-rECI1(2), rECI2(3)-rECI1(3));
+% fprintf('Velocity difference (ECI2 - ECI1): vx = %.6f km/s, vy = %.6f km/s, vz = %.6f km/s\n', ...
+%        vECI2(1)-vECI1(1), vECI2(2)-vECI1(2), vECI2(3)-vECI1(3));
+% Example output:
+% rECI1: x = 2801.905474 km, y = 3641.952685 km, z = 5209.109530 km
+% rECI2: x = 2801.905474 km, y = 3641.952685 km, z = 5209.109530 km
+% vECI1: vx = -6.644010 km/s, vy = -0.085065 km/s, vz = 3.698018 km/s
+% vECI2: vx = -6.644010 km/s, vy = -0.085065 km/s, vz = 3.698018 km/s
+% Position difference (ECI2 - ECI1): x = -0.000000 km, y = -0.000000 km, z = 0.000000 km
+% Velocity difference (ECI2 - ECI1): vx = 0.000000 km/s, vy = -0.000000 km/s, vz = -0.000000 km/s

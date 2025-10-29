@@ -18,9 +18,22 @@ Overall Idea of a UKF:
 - Given a timestep, a measurement, and our last state, we take some informed samples around our estimated state to guess where we are(what our current state is)
 '''
 
+'''
+Why BDot is probably not great -- 
+- As your dt grows smaller and smaller, the noise to signal ratio in the finite-differences 
+derivative gets higher and higher
+- At the same time, as your dt grows larger and larger, error quaternions grow larger and larger
+    - intuitively, a lower dt means more updates means better results
+- this dichotemy is worsened by the fact that, technically, there are always 2 solutions to a large error
+    - 1. your gyro bias is huge OR 2. your quaternion is off
+    - while this dichotemy is always present, it becomes far more exacerbated when both gyro bias and quaternion are 
+    used in propagation AND measurement calculations(rather than only quaternion being used in both)
+'''
+
 global_Q = np.eye(6)*0.0001
 global_R = np.eye(3)*0.001
-dt = 0.1
+#global_R = np.eye(6)*0.1
+dt = 0.2
 timeframe = datetime.now()
 kepler_posn = np.array([7e6, math.radians(0.05), math.radians(50), math.radians(311.6218), math.radians(199.2431), math.radians(48.4420)])
 xyz_posn = kep_to_cart(kepler_posn)[:3]
@@ -152,12 +165,12 @@ def get_measurements(quat_sigmas):
     measurements = []
     for sigma in quat_sigmas:
         quat = Quaternion(sigma[:4])#rotation from body to ECI
-        w = sigma[4:]
+        w = sigma[4:] + gyro_measurement
         ECI_to_body = quat.inverse
         
         expected_reading_one = rotate(np.array([1, 0, 0]), ECI_to_body)
         
-        expected_reading_two = rotate(np.array([0, 1, 0]), ECI_to_body)
+        #expected_reading_two = np.zeros(3) - np.cross(w, magnetometer_readings[-1])
         #measurements.append(np.concatenate((expected_reading_one, expected_reading_two)))
         measurements.append(expected_reading_one)
     return np.array(measurements)
@@ -249,6 +262,8 @@ if __name__ == '__main__':
 
     #with a simulated u vector
     rotation_quaternion = Quaternion(scalar = 0, vector = true_angular_velocity)
+
+    magnetometer_readings.append(rotate(np.array([1,0,0]) + np.random.normal(loc = 0, scale = 0.01, size = 3), true_rot.inverse))
     for i in range(1000):
         #with gyro
         gyro_measurement = true_angular_velocity + np.random.normal(loc = gyro_bias, scale = 0.01)
@@ -261,13 +276,17 @@ if __name__ == '__main__':
         ref_to_body = true_rot.inverse
 
         given_reading_one = rotate(np.array([1,0,0]) + np.random.normal(loc = 0, scale = 0.01, size = 3), ref_to_body)
-        given_reading_two = rotate(np.array([0, 1,0]) + np.random.normal(loc = 0, scale = 0.07, size = 3), ref_to_body)
         given_reading_one = given_reading_one / np.linalg.norm(given_reading_one)
-        given_reading_two = given_reading_two / np.linalg.norm(given_reading_two)
+
+        derivative_reading_one = (given_reading_one - magnetometer_readings[-1]) / dt
+
+        magnetometer_readings.append(given_reading_one)
+
+        #print(derivative_reading_one, -np.cross(true_angular_velocity, given_reading_one))
 
 
         measurement = given_reading_one
-
+        #measurement = np.concatenate([given_reading_one, derivative_reading_one])
         if(i % 100 == 0):
             print(true_rot, rot)
             print(quat_diff(true_rot, rot))

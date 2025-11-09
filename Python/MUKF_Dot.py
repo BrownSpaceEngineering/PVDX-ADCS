@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 from typing import List, Tuple
 from copy import deepcopy
 import time
+import matplotlib.pyplot as plt
 
 #ALL CREDITS TO https://kodlab.seas.upenn.edu/uploads/Arun/UKFpaper.pdf FOR THE EQUATIONS
 '''
@@ -149,7 +150,7 @@ def propagate_quat_sigmas(quat_sigmas):
     new_sigmas = []
     for sigma in quat_sigmas:
         quaternion = Quaternion(sigma[:4])
-        w = sigma[4:7] + gyro_measurement
+        w = -sigma[4:7] + gyro_measurement
         change_in_rotation = rotation_to_quat(w * dt)
         new_quaternion = quaternion * change_in_rotation
         
@@ -165,10 +166,10 @@ def get_measurements(quat_sigmas):
     measurements = []
     for sigma in quat_sigmas:
         quat = Quaternion(sigma[:4])#rotation from body to ECI
-        w = sigma[4:] + gyro_measurement
         ECI_to_body = quat.inverse
         
         expected_reading_one = rotate(np.array([1, 0, 0]), ECI_to_body)
+        expected_reading_two = rotate(np.array([0, 1, 0]), ECI_to_body)
         
         #expected_reading_two = np.zeros(3) - np.cross(w, magnetometer_readings[-1])
         #measurements.append(np.concatenate((expected_reading_one, expected_reading_two)))
@@ -252,21 +253,25 @@ def iterate(error_state, rotation : Quaternion, P, obs):
 
 if __name__ == '__main__':
     true_rot = Quaternion(np.random.normal(loc = 0.5, scale = 0.5, size = 4)).normalised
-    rot = true_rot.elements + np.random.normal(loc = 0, scale = 0.1, size = 4)
+    rot = true_rot.elements + np.random.normal(loc = 0, scale = 0.05, size = 4)
     rot = Quaternion(rot).normalised
     P = np.eye(6) * 0.001
     state = np.zeros(6)
 
-    true_angular_velocity = np.array([0.1, -0.1, 0.25])#30 degrees per second, which is too fast for us but is good for simulation purposes
-    gyro_bias = np.array([0.01, -0.01, 0.005])
+    true_angular_velocity = np.array([0.05, 0.01, 0])#30 degrees per second, which is too fast for us but is good for simulation purposes
+    gyro_bias = np.array([0.00005, 0.00005, -0.0001])
 
     #with a simulated u vector
     rotation_quaternion = Quaternion(scalar = 0, vector = true_angular_velocity)
 
-    magnetometer_readings.append(rotate(np.array([1,0,0]) + np.random.normal(loc = 0, scale = 0.01, size = 3), true_rot.inverse))
-    for i in range(1000):
+    magnetometer_readings.append(rotate(np.array([1,0,0]) + np.random.normal(loc = gyro_bias, scale = 0.002, size = 3), true_rot.inverse))
+    
+    
+    diffs = []
+    total_bias = np.zeros(3)
+    for i in range(15000):
         #with gyro
-        gyro_measurement = true_angular_velocity + np.random.normal(loc = gyro_bias, scale = 0.01)
+        gyro_measurement = true_angular_velocity + np.random.normal(loc = gyro_bias, scale = 0.001)
         
         #without gyro
         #gyro_measurement = [0,0,0]
@@ -278,7 +283,8 @@ if __name__ == '__main__':
         given_reading_one = rotate(np.array([1,0,0]) + np.random.normal(loc = 0, scale = 0.01, size = 3), ref_to_body)
         given_reading_one = given_reading_one / np.linalg.norm(given_reading_one)
 
-        derivative_reading_one = (given_reading_one - magnetometer_readings[-1]) / dt
+        given_reading_two = rotate(np.array([0,1,0]) + np.random.normal(loc = 0, scale = 0.01, size = 3), ref_to_body)
+        given_reading_two = given_reading_two / np.linalg.norm(given_reading_two)
 
         magnetometer_readings.append(given_reading_one)
 
@@ -286,18 +292,25 @@ if __name__ == '__main__':
 
 
         measurement = given_reading_one
-        #measurement = np.concatenate([given_reading_one, derivative_reading_one])
+        #measurement = np.concatenate([given_reading_one, given_reading_two])
+        diffs.append(np.linalg.norm(np.array(quat_diff(true_rot, rot))))
         if(i % 100 == 0):
             print(true_rot, rot)
             print(quat_diff(true_rot, rot))
         try:
             state, rot, P = iterate(state, rot, P, measurement)
-            state[:3] = np.zeros(3)#we need to reset our error vector here, as we already tacked on the error vector to the rotation at the end of the last state! 
+            state[:6] = np.zeros(6)#we need to reset our error vector here, as we already tacked on the error vector to the rotation at the end of the last state! 
+            #total_bias += state[3:6]
         except Exception as e:
             print(np.linalg.eigvals(P))
             print(e)
             break
-    print(state)
+    #print("AVG BIAS: ", total_bias / 10000)
+    # plt.title("Pointing Error Over Time Under No Spin -- One Vector")
+    # plt.scatter(np.arange(10000) * dt, diffs, s = 3)
+    # plt.xlabel("Seconds")
+    # plt.ylabel("Magnitude of Degrees(error)")
+    # plt.show()
     # print(rot)
     # print(true_rot)
     # print(quat_diff(rot, true_rot))

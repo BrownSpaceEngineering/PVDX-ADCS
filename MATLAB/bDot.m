@@ -5,6 +5,9 @@
 %k: the gain value
 %dT: time step
 
+%OUPUT:
+%magnetic moment to produce in body frame
+
 
 function  [dipole_x, dipole_y, dipole_z] = Bdot(M_t, M_t_minus_1, k, dT)
 %calculate derivative of magnetic field
@@ -19,7 +22,3 @@ dipole_y = m(2);
 dipole_z = m(3);
 
 end
-
-
-
-

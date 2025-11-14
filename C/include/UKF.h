@@ -1,6 +1,7 @@
 #ifndef POINTING_H
 #define POINTING_H
 
+#include <stdbool.h>
 static float quaternionState[4];
 static float quaternionGoal[4];
 static float tleState[6];

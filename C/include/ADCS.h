@@ -14,12 +14,12 @@ static bool finishedInitialDetumbling = false;
 static bool initialized = false;
 static float magnetometer_t1[3];
 
-bool init();
+void init();
 /**
  * At timestep 0, call this initializer instead of the ADCSBody
  */
 
-void adcsBody(float* magnetometer_t0, float* magnetometer_t1,float* gyroscope, float* photodiode_inputs, float* tle, int temp, int time, int us_since_last_iter, float* outputCurrents);
+void adcsBody(float* magnetometer_t0, float* magnetometer_t1,float* gyroscope, float* photodiode_inputs, float* tle, int temperature, int abs_time, int us_since_last_iter, float* outputCurrents);
 /**
  * This is currently a very basic sketch of ADCS code in C, made as a skeleton to build off of in the future.
  * Not everything under the hood has been included, but the function header should be finalized
@@ -41,7 +41,7 @@ bool failureCheck();
 
 bool simulatedSunVector(float* photodiode_inputs, float* sun_vector);
 
-bool bdot_detumbling(float* magnetometer_t0, float* magnetometer_t1, float* moments);
+void bdot_detumbling(float* magnetometer_t0, float* magnetometer_t1, float dt, float* moments);
 
 enum ADCS_MODE determine_mode(float* magnetometer, float* gyroscope, bool inSun);
 

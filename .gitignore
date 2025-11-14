@@ -1,0 +1,4 @@
+**/.vscode/
+**/__pycache__/
+*.asv
+*.DS_Store

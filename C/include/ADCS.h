@@ -19,7 +19,7 @@ void init();
  * At timestep 0, call this initializer instead of the ADCSBody
  */
 
-void adcsBody(float* magnetometer_t0, float* magnetometer_t1,float* gyroscope, float* photodiode_inputs, float* tle, int temperature, int abs_time, int us_since_last_iter, float* outputCurrents);
+void adcsBody(float* magnetometer_t0, float* magnetometer_t1, float* gyroscope, bool inSun, float* sun_vector, float* tle, int temperature, int abs_time, int us_since_last_iter, float* output_currents);
 /**
  * This is currently a very basic sketch of ADCS code in C, made as a skeleton to build off of in the future.
  * Not everything under the hood has been included, but the function header should be finalized

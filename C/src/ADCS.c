@@ -31,10 +31,12 @@ enum ADCS_MODE determine_mode(float* magnetometer, float* gyroscope, bool inSun)
 }
 
 bool simulatedSunVector(float* photodiode_inputs, float* sun_vector){
+    //S6 on the design doc
     return false;
 }
 
-void adcsBody(float* magnetometer_t0, float* magnetometer_t1, float* gyroscope, float* photodiode_inputs, float* tle, int temperature, int abs_time, int us_since_last_iter, float* output_currents){
+void adcsBody(float* magnetometer_t0, float* magnetometer_t1, float* gyroscope, bool inSun, float* sun_vector, float* tle, int temperature, int abs_time, int us_since_last_iter, float* output_currents){
+    //S4 on the design docs
     if(!initialized){
         init();
         return;
@@ -47,8 +49,6 @@ void adcsBody(float* magnetometer_t0, float* magnetometer_t1, float* gyroscope, 
         return;
     }
     else{
-        float sun_vector[3];
-        bool inSun = simulatedSunVector(photodiode_inputs, sun_vector);
         adcsMode = determine_mode(magnetometer_t0, gyroscope, inSun);
         if(adcsMode == DETUMBLING){
             float moments[3];

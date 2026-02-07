@@ -19,7 +19,7 @@ Overall Idea of a UKF:
 '''
 
 global_Q = np.eye(6)*0.0001
-global_R = np.eye(6)*0.001
+global_R = np.eye(3)*0.001
 dt = 0.2
 timeframe = datetime.now()
 kepler_posn = np.array([7e6, math.radians(0.05), math.radians(50), math.radians(311.6218), math.radians(199.2431), math.radians(48.4420)])
@@ -151,10 +151,8 @@ def get_measurements(quat_sigmas):
         quat = Quaternion(sigma[:4])#rotation from body to ECI
         w = sigma[4:]
         ECI_to_body = quat.inverse
-        expected_reading_one = rotate(np.array([1, 0, 0]), ECI_to_body)
-        expected_reading_two = rotate(np.array([0, 1, 0]), ECI_to_body)
-        measurements.append(np.concatenate((expected_reading_one, expected_reading_two)))
-        #measurements.append(quat.elements)
+        expected_reading = rotate(np.array([1, 1, 1]), ECI_to_body)
+        measurements.append(expected_reading)
     return np.array(measurements)
 
 def ensure_positive_definite(P, epsilon=1e-9):
@@ -189,8 +187,7 @@ def iterate(error_state, rotation : Quaternion, P, obs):
         quaternions_of_propagated_sigmas.append(Quaternion(y[:4]))
     average_quaternion, propagated_error_vectors = gradient_descent(quaternions_of_propagated_sigmas, rotation)
     propagated_errors = np.hstack([propagated_error_vectors, propagated_quat_sigmas[:, 4:]])
-
-    
+    #print(propagated_errors)
     mean_error = np.zeros(n)
     for column in range(n):#for each state element
         var_mean = 0
@@ -204,12 +201,12 @@ def iterate(error_state, rotation : Quaternion, P, obs):
             var_mean += measurements[row][column] * mean_weights[row]
         mean_measurement[column] = var_mean
 
-
     P_hat = np.zeros((n, n))
     
     for i, error in enumerate(propagated_errors):
         err = error - mean_error
         P_hat += covariance_weights[i] * np.outer(err, err)
+
     P_xz = np.zeros((n, measurements.shape[1]))
     for i, error in enumerate(propagated_errors):
         err = error - mean_error
@@ -232,19 +229,18 @@ def iterate(error_state, rotation : Quaternion, P, obs):
 
 
 if __name__ == '__main__':
-    #true_rot = Quaternion(np.random.normal(loc = 0.5, scale = 0.5, size = 4)).normalised
-    #rot = true_rot.elements + np.random.normal(loc = 0, scale = 0.4, size = 4)
-    true_rot = Quaternion([1, 0, 0, 0])
-    rot = [0.95, 0.15, 0, 0]
+    true_rot = Quaternion(np.random.normal(loc = 0.5, scale = 0.5, size = 4)).normalised
+    rot = true_rot.elements + np.random.normal(loc = 0, scale = 0.05, size = 4)
     rot = Quaternion(rot).normalised
-    P = np.eye(6) * 0.001
+    P = np.eye(6) * 0.01
     state = np.zeros(6)
 
-    true_angular_velocity = np.array([0.3, -0.3, 0.25])#30 degrees per second, which is too fast for us but is good for simulation purposes
-    gyro_bias = [0.05, -0.05, 0.05]
-    for i in range(1000):
+    true_angular_velocity = np.array([0.01, -0.01, 0.01])
+    gyro_bias = [0.00, -0.00, 0.00]
+    np.set_printoptions(linewidth=300, threshold=np.inf, suppress=True, precision = 6)
+    for i in range(5000):
         #with gyro
-        gyro_measurement = true_angular_velocity + np.random.normal(loc = gyro_bias, scale = 0.0001)
+        gyro_measurement = true_angular_velocity + np.random.normal(loc = gyro_bias, scale = 0.001)
         
         #without gyro
         #gyro_measurement = [0,0,0]
@@ -253,23 +249,23 @@ if __name__ == '__main__':
         true_rot = true_rot * change_in_true_rotation.inverse#new frame --> old frame (calculated by inverse), followed by old frame --> inertial (old true_rotation)
         ref_to_body = true_rot.inverse
 
-        given_reading_one = rotate(np.array([1,0,0]) + np.random.normal(loc = 0, scale = 0.01, size = 3), ref_to_body)
-        given_reading_two = rotate(np.array([0, 1,0]) + np.random.normal(loc = 0, scale = 0.01, size = 3), ref_to_body)
-        given_reading_one = given_reading_one / np.linalg.norm(given_reading_one)
-        given_reading_two = given_reading_two / np.linalg.norm(given_reading_two)
-        measurement = np.concatenate((given_reading_one, given_reading_two))
+        given_reading = rotate(np.array([1,1,1]) + np.random.normal(loc = 0, scale = 0.001, size = 3), ref_to_body)
+        given_reading = given_reading / np.linalg.norm(given_reading)
+        measurement = given_reading
 
         try:
             state, rot, P = iterate(state, rot, P, measurement)
-            if(i % 100 == 0):
+            if(i % 50 == 0):
+                #print(rot, true_rot)
                 print(quat_diff(rot, true_rot))
-            state[:3] = np.zeros(3)#we need to reset our error vector here, as we already tacked on the error vector to the rotation at the end of the last state! 
+            #we need to reset our error vector here, as we already tacked on the error vector to the rotation at the end of the last state!          
+            #state[:3] = np.zeros(3)#choice 1: don't reset the moving bias
+            state[:6] = np.zeros(6)#choice 2: reset the moving bias as well --> empirical tests show this to be more effective
         except Exception as e:
-            print(np.linalg.eigvals(P))
             print(e)
             break
         
-    print(state)
-    print(rot)
-    print(true_rot)
+    # print(state)
+    # print(rot)
+    # print(true_rot)
     # print(quat_diff(rot, true_rot))

@@ -104,19 +104,26 @@ def eci_sun_vector(time : datetime.time):
     sun_vec = np.array([sun_x, sun_y, sun_z])
     sun_unit_vec = sun_vec / (np.linalg.norm(sun_vec))
     return sun_unit_vec
-
+def quaternion_to_rotation(x : Quaternion):
+    '''
+    Function that converts a quaternion into a rotation vector
+    '''
+    quat = x.elements
+    if quat[0] < 0:
+        quat = -quat
+    if(quat[0] >= 1):
+        return np.zeros(3)
+    theta = 2 * math.acos(quat[0])
+    if(theta == 0):
+        return np.zeros(3)
+    vec = theta * quat[1:] / np.sqrt(1-quat[0]**2)
+    return vec
 def quat_diff(q1, q2):
-    '''Calculates the Euler angle differences between two quaternions'''
-    assert(isinstance(q1, Quaternion))
-    assert(isinstance(q2, Quaternion))
-    qd = q1.conjugate * q2
+    '''Calculates the rotation angle difference between two quaternions'''
+    qd = q2 * q1.inverse
+    qd_rot = quaternion_to_rotation(qd)
 
-    # Calculate Euler angles from this difference quaternion
-    phi   = math.atan2( 2 * (qd.w * qd.x + qd.y * qd.z), 1 - 2 * (qd.x**2 + qd.y**2) )
-    theta = math.asin ( 2 * (qd.w * qd.y - qd.z * qd.x) )
-    psi   = math.atan2( 2 * (qd.w * qd.z + qd.x * qd.y), 1 - 2 * (qd.y**2 + qd.z**2) )
-
-    return math.degrees(phi), math.degrees(theta), math.degrees(psi)
+    return math.degrees(qd_rot[0]), math.degrees(qd_rot[1]), math.degrees(qd_rot[2])
 
 def skew_symmetric(w):
     '''Calculates the skew symmetric matrix for w'''

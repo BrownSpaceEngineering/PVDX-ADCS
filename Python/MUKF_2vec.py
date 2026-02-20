@@ -260,8 +260,9 @@ if __name__ == '__main__':
             state, rot, P = iterate(state, rot, P, measurement)
             if(i % 10 == 0):
                 #print(rot, true_rot)
-                print(quat_diff(rot, true_rot))
+                print(quat_diff(rot, true_rot), true_angular_velocity)
                 #print(state[3:])
+                true_angular_velocity += np.random.normal(loc = 0, scale = 0.005, size = 3)
             state[:3] = np.zeros(3)#we need to reset our error vector here, as we already tacked on the error vector to the rotation at the end of the last state!          
         except Exception as e:
             print(e)

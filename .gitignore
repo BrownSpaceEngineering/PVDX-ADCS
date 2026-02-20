@@ -2,3 +2,5 @@
 **/__pycache__/
 *.asv
 *.DS_Store
+**/codegen/
+*.xml

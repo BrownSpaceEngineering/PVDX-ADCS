@@ -1,0 +1,61 @@
+% --- OVERVIEW: 
+% {vec(q_want), vec(q_current), vec(q_omega)} ->
+% {vec(tau)} ->
+% {vec(m)} (magnetic moment)
+
+% Given 3 quaternions, {q_want, q_expected, q_omega}, return the torque needed at
+% that time
+
+function [m] = get_m(q_want, q_current, r_omega, B)
+    arguments
+        q_want (4,1) double
+        q_current (4,1) double 
+        r_omega (1,4) double % angular velocity in axis-angle format (gyro)
+        B (1,3) double % magnetic field (x, y, z)
+    end
+    e = error_axis_angle(q_want, q_current);
+    m = PD_loop(e, r_omega, B);
+end
+
+function [m] = tau_to_m(tau, B)
+% Obtains wanted magnetic moment from wanted torque and current magnetic field
+    arguments
+        tau (1,3) double % torque (x, y, z)
+        B (1,3) double % magnetic field (x, y, z)
+        end
+    m = cross(B, tau) / (norm(B)^2);
+end
+
+function [e] = error_axis_angle(q_want, q_current)
+% Obtains r_e, the error vector in axis-angle format
+    arguments
+        q_want (1,4) double 
+        q_current (1,4) double 
+    end
+    q_error = quatmultiply(q_want, quatinv(q_current));
+    angle = 2 * acos(q_error(1));
+    axis = q_error(2:4) / sin(angle/2); 
+    
+    e = [axis; angle];
+end
+
+function [m] = PD_loop(r_e, r_omega, B)
+    arguments
+        r_e (4,1) double % axis-angle error vector
+        r_omega (4,1) double % angular velocity in axis-angle format (gyro)
+        B (3,1) double % Magnetic field vector (x, y, z)
+    end
+    placeholder = 1;
+    Kp = [-placeholder, -placeholder, -placeholder]; % (to be changed) 
+    Kd = [-placeholder, -placeholder, -placeholder]; % (to be changed)
+
+    tau = zeros(3, 1);
+
+    for i = 1:3
+        Pi = Kp(i) * r_e(4) * r_e(i);
+        Di = Kd(i) * r_omega(4) * r_omega(i);
+        tau(i) = Pi + Di;
+    end
+
+    m = tau_to_m(tau, B);
+end

@@ -1,0 +1,64 @@
+%INPUTS:
+%(x, y, z) ECI coordinates of satellite
+%q_world: quaternion representing the current satellite orientation in
+%world frame
+%(Px, Py, Pz) -- ECI coordinates of Providence Rhode Island
+
+%RETURN:
+%closest quaternion to current quaternion that points down to earth
+
+function [qw, qx, qy, qz] = fdownQuaternion(x, y, z, q_world, Providence)
+
+%subtract the current ECI from Providence to get the relative vector from
+
+%satellite to Rhode island
+nadir = [x; y; z;] - Providence;
+
+if(nadir == 0)
+    qw = 0;
+    qx = 0;
+    qy = 0;
+    qz = 0;
+    return;
+end
+%normalize this vector
+nadir = nadir / norm(nadir);
+
+
+%get the world rotation matrix from the world quaternion
+world_rotation_matrix = quat2rotm(q_world);
+
+%let us assume the z direction needs to point in the nadir direction
+
+%let us assume the y-direction has a small moment of inertia
+
+%The idea is to project the y component onto the nadir plane to find
+%closest rotation
+
+new_y = world_rotation_matrix(:,2) - dot(world_rotation_matrix(:,2), nadir) * nadir;
+
+%normalize new_y:
+new_y = new_y / norm(new_y);    
+
+%calculate rotation matrix:: cross nadir and new y to keep orthogonal
+rotationMatrix = [cross(nadir, new_y), new_y, nadir];
+
+%convert to quaternion
+down_quaternion = rotm2quat(rotationMatrix);
+
+qw = down_quaternion(1);
+qx = down_quaternion(2);
+qy = down_quaternion(3);
+qz = down_quaternion(4);
+
+end
+
+
+target = [0; 0; 0];  % Providence
+
+q_world = quaternion(1,0,0,0);  % identity quaternion
+quat2rotm(q_world)
+
+[qw, qx, qy, qz] = fdownQuaternion(1, 0, 0, q_world, target)
+quat2rotm([qw, qx, qy, qz])
+

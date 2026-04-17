@@ -16,8 +16,8 @@ function simulate()
     Q = eye(6) * 0.001;%process noise matrix
     R = eye(6) * 0.01;%measurement noise matrix for 2 vector
 
-    reference_1 = [1, 0, 0];
-    reference_2 = [0, 0, 1];
+    reference_1 = [40, 0, 0];
+    reference_2 = [0, 40, 0];
     for i = 1:1000 %iterate
         simulated_gyro_measurement = true_omega + normrnd(gyro_bias, gyro_noise);
 
@@ -55,7 +55,7 @@ function [new_error_state, new_guess, new_cov] = iterate(current_error_state, cu
     n = 6;%size of the state
     current_cov = ensure_psd(current_cov);
     msmt_size = length(ref_readings);
-    alpha = 0.0001;
+    alpha = 0.01;
     beta = 2;
     lambda = calculate_lambda(n, alpha);
     error_sigmas = get_sigma_points(n, lambda, current_error_state, current_cov + Q);
@@ -113,8 +113,7 @@ function [new_error_state, new_guess, new_cov] = iterate(current_error_state, cu
     x_hat = mean_error + (k*(body_msmts - mean_msmt)')';
     
 
-    I_KH = eye(n) - k * inv(P_vv) * P_xz';
-    P = I_KH * P_hat * I_KH' + k * R * k';
+    P = P_hat - k * P_vv * k';
     P = ensure_psd(P);
     
     x_hat_rot = Quaternion.rotation_vec2quaternion(x_hat(1:3));

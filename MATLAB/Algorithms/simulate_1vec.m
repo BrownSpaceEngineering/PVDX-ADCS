@@ -4,7 +4,8 @@ function simulate_1vec()
     %setting constants
     dt = 0.5;
     true_body_to_ref = Quaternion([0.2812, -0.6998, 0.5497, -0.3592]).quaternion_normalize();%the true body --> reference rotation
-    current_guess = true_body_to_ref;%the estimated body --> reference rotation
+    current_guess = [0.2812, -0.6998, 0.5497, -0.3592] + normrnd(0.05, 0.1, [1,4]);%the estimated body --> reference rotation
+    current_guess = Quaternion(current_guess / norm(current_guess));
 
     true_omega = deg2rad([2, 0.5, -1]);%true angular velocity in the reference frame
 
@@ -12,7 +13,7 @@ function simulate_1vec()
     %omega_b = true_ref_to_body.apply_rotation(-omega_icrf2b);
     %true_omega = reshape(deg2rad(omega_b), [1,3]);
     
-    gyro_bias = [0.001, -0.001, 0.001];
+    gyro_bias = [0.001, 0.001, 0.001];
     gyro_noise = 0.001;
     measurement_noise = 0.03;
 
@@ -56,6 +57,7 @@ function simulate_1vec()
         [state, current_guess, cov] = iterate(state, current_guess, cov, ref_readings, body_msmts,...
             simulated_gyro_measurement, Q, R, dt);
         state(1:6) = zeros([1,6]);%for 1 vector --> no bias estimation
+        %state(1:3) = zeros([1,3]);
         last_body = body;
         last_reference = reference;
         reference = reference + normrnd(0, 0.001, [1, 3]);
@@ -140,8 +142,7 @@ function [new_error_state, new_guess, new_cov] = iterate(current_error_state, cu
     x_hat = mean_error + (k*(body_msmts - mean_msmt)')';
     
 
-    I_KH = eye(n) - k * inv(P_vv) * P_xz';
-    P = I_KH * P_hat * I_KH' + k * R * k';
+    P = P_hat - k * P_vv * k';
     P = ensure_psd(P);
     
     x_hat_rot = Quaternion.rotation_vec2quaternion(x_hat(1:3));

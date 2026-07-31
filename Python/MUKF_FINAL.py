@@ -23,17 +23,15 @@ sigma_gyro          = 0.0005   # gyro white-noise std dev [rad/s]
 sigma_magnetometer  = 0.05    # magnetometer vector-sensor noise std dev in uT
 sigma_unit_vector   = 0.01    # second reference vector sensor noise std dev (unit vector)
 true_gyro_bias   = np.array([ 0.002, -0.001,  0.0015])  # constant gyro bias [rad/s]
-true_scale_factor = np.array([ 0.01,   0.01,   0.01  ])  # gyro scale-factor error [-]
 dt = 0.1 
 
-# EXPANDED: Q and R tuned for 9 states: [dq_x, dq_y, dq_z, b_x, b_y, b_z, sf_x, sf_y, sf_z]
-global_Q = np.zeros((9, 9))
-global_Q[0:3, 0:3] = np.eye(3) * (sigma_gyro * dt)**2   # Attitude noise: (sigma_gyro * dt)^2 = (0.001*0.1)^2
-global_Q[3:6, 3:6] = np.eye(3) * 1e-10  # Bias random walk (constant in simulation)
-global_Q[6:9, 6:9] = np.eye(3) * 1e-10  # Scale factor random walk (constant in simulation)
+# 6-state error vector: [dq_x, dq_y, dq_z, b_x, b_y, b_z]
+global_Q = np.zeros((6, 6))
+global_Q[0:3, 0:3] = np.eye(3) * (sigma_gyro * dt)**2    # Attitude noise
+global_Q[3:6, 3:6] = np.eye(3) * 1e-10  # Bias random walk
 
 update_every = int(10 / dt)  # perform a measurement update every N propagation steps → 0.1 Hz
-switch_every = int(60 * 10 / dt) # switch between 2 vector and 1 vector 
+switch_every = int(60 * 45 / dt) # switch between 2 vector and 1 vector 
 vector_input = 1 # 1 or 2 vector. the code will start on this mode until switch_every
 simulation_time = int(60 * 180 / dt) # seconds of simulation. ~90 minutes per orbit
 
@@ -112,7 +110,7 @@ def get_sigma_points(lam, x, P):
 
 def calculate_lambda(alpha, x):
     n = x.shape[0]
-    kappa = 0
+    kappa = 9 - n
     return alpha**2 * (n + kappa) - n
 
 def error_sigmas_to_quat_sigmas(error_sigmas, rotation : Quaternion):
@@ -121,8 +119,7 @@ def error_sigmas_to_quat_sigmas(error_sigmas, rotation : Quaternion):
         quat_rot = rotation_to_quat(sigma[:3])
         new_quat_rot = quat_rot * rotation
         new_quat_rot = new_quat_rot.normalised
-        # MODIFIED: sigma[3:] now cleanly grabs the remaining 6 elements (Bias + SF)
-        quat_sigmas.append(np.concatenate([new_quat_rot.elements, sigma[3:]]))
+        quat_sigmas.append(np.concatenate([new_quat_rot.elements, sigma[3:6]]))
     return np.array(quat_sigmas)
 
 def propagate_quat_sigmas(quat_sigmas):
@@ -130,18 +127,14 @@ def propagate_quat_sigmas(quat_sigmas):
     new_sigmas = []
     for sigma in quat_sigmas:
         quaternion = sigma[:4]
-        # MODIFIED: Extract bias and scale factor
         bias = sigma[4:7]
-        scale_factor = sigma[7:10]
-        
-        # MODIFIED: Apply both bias and scale factor correction
-        w = gyro_measurement - bias - (scale_factor * gyro_measurement)
-        
+
+        w = gyro_measurement - bias
+
         new_quaternion = Quaternion(quaternion)*rotation_to_quat(w * dt).inverse
         new_quaternion = new_quaternion.normalised
-        
-        # MODIFIED: Pass the 6 error states forward
-        new_sigmas.append(np.concatenate([new_quaternion.elements, sigma[4:10]]))
+
+        new_sigmas.append(np.concatenate([new_quaternion.elements, sigma[4:7]]))
     return np.array(new_sigmas)
 
 def get_measurements(quat_sigmas, ref_vecs):
@@ -205,7 +198,7 @@ def iterate(error_state, rotation: Quaternion, P, obs=None, ref_vecs=None, R=Non
     average_quaternion, propagated_error_vectors = gradient_descent(
         quaternions_of_propagated_sigmas, rotation, weights=mean_weights
     )
-    propagated_errors = np.hstack([propagated_error_vectors, propagated_quat_sigmas[:, 4:]])
+    propagated_errors = np.hstack([propagated_error_vectors, propagated_quat_sigmas[:, 4:7]])
 
     mean_error = np.zeros(n)
     for column in range(n):
@@ -263,9 +256,9 @@ def quat_diff(q1, q2):
     return np.linalg.norm(quaternion_to_rotation(q_err))
 
 if __name__ == '__main__':
-    # EXPANDED: 9x9 Covariance and 9-element state
-    P = np.eye(9) * 0.01
-    state = np.zeros(9)
+    # 6x6 Covariance and 6-element state
+    P = np.eye(6) * 0.01
+    state = np.zeros(6)
 
     orbit_sim = OrbitIGRFSimulator(epoch=datetime(2024, 6, 1, 0, 0, 0))
 
@@ -297,7 +290,7 @@ if __name__ == '__main__':
         true_rot_prev = true_rot
 
         gyro_noise = np.random.normal(loc=0, scale=sigma_gyro, size=3)
-        gyro_measurement = true_angular_velocity + true_gyro_bias + (true_scale_factor * true_angular_velocity) + gyro_noise
+        gyro_measurement = true_angular_velocity + true_gyro_bias + gyro_noise
 
         # ── filter step ───────────────────────────────────────────────────────
         try:
@@ -309,7 +302,7 @@ if __name__ == '__main__':
                     r1 = b_body_uT + np.random.normal(loc=0, scale=sigma_magnetometer, size=3)
                     measurement = r1 / np.linalg.norm(r1)
                     ref_vecs = reference_vector
-                    R_update = np.eye(3) * (sigma_magnetometer / b_uT_mag)**2
+                    R_update = np.eye(3) * 2e-5
                 else:
                     b_body_uT = rotate(b_eci_uT, ref_to_body)
                     r1 = b_body_uT + np.random.normal(loc=0, scale=sigma_magnetometer, size=3)
@@ -317,8 +310,8 @@ if __name__ == '__main__':
                     measurement = np.concatenate([r1 / np.linalg.norm(r1), r2 / np.linalg.norm(r2)])
                     ref_vecs = [reference_vector, ref_vec_2]
                     R_update = np.block([
-                        [np.eye(3) * (sigma_magnetometer / b_uT_mag)**2, np.zeros((3, 3))],
-                        [np.zeros((3, 3)),                                np.eye(3) * sigma_unit_vector**2],
+                        [np.eye(3) * 2e-5, np.zeros((3, 3))],
+                        [np.zeros((3, 3)), np.eye(3) * sigma_unit_vector**2],
                     ])
                 state, rot, P = iterate(state, rot, P, measurement, ref_vecs, R_update)
             else:
@@ -327,7 +320,7 @@ if __name__ == '__main__':
 
             if i % 100 == 0:
                 error_deg = math.degrees(quat_diff(rot, true_rot))
-                print(f"{int(i * dt):4d} seconds in | Mode: {vector_input}v | Magnitude of attitude err: {error_deg:6.3f} deg | Bias Est: {state[3:6]} | SF Est: {state[6:9]}")
+                print(f"{int(i * dt):4d} seconds in | Mode: {vector_input}v | Magnitude of attitude err: {error_deg:6.3f} deg | Bias Est: {state[3:6]}")
 
             state[:3] = np.zeros(3)
 

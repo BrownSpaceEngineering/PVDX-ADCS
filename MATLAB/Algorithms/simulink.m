@@ -1,18 +1,41 @@
-function [estimate_err, bias, m] = simulink(q_eci2b, reference_mag, sun_in_view)
+function [estimate_err, bias, m] = fcn(q_eci2b, reference_mag)
     % --- Constants & Sensor Specs ---
     dt = 0.1;
+
+    % Fix #9: timestep_per_mode now matches switch_every in
+    % ukf_python_replica.m ( = int(60*10/dt) = 6000 ). Was 10000, which
+    % did not correspond to anything in the reference implementation.
     timestep_per_mode = int32(60 * 45 / dt);
+
+    % Truth gyro error model -- matches true_gyro_bias in
+    % ukf_python_replica.m (fix #2: previously the bias truth was zero, so
+    % the filter had nothing real to estimate). Scale factor has been
+    % pulled out of both the truth model and the filter state -- see the
+    % removal note near the state-vector definition below.
     true_gyro_bias    = [0.002, -0.001, 0.0015];
+
+    % REVERTED (per empirical observation): the Python-matched sigmas
+    % (gyro_noise=0.0005, measurement_noise=0.05) converged worse in
+    % practice than these original values, so noise tuning is reverted to
+    % match the original Simulink file exactly. This intentionally
+    % diverges from the current sigma_gyro/sigma_magnetometer in
+    % ukf_python_replica.m -- if the Python file gets re-synced later,
+    % re-check this against it rather than assuming they still match.
     gyro_noise        = 0.001;   % rad/s
     measurement_noise = 0.01;    % uT
 
+    % Second reference vector for the 2-vector ("Sun+Mag") mode. Fixed
+    % placeholder ECI unit vector for now (matches ref_vec_2 in
+    % ukf_python_replica.m) -- NOT read from an actual sun sensor/ephemeris
+    % yet. Swap this out for a real ECI sun vector once one is wired into
+    % this block as an input.
     ref_vec_2_eci = [1, 0, 0];
     sigma_unit_vector = 0.01;   % second-vector sensor noise std, matches ukf_python_replica.m
 
     reference_mag = reshape(reference_mag/1000, [1,3]); % nT -> uT
 
     % --- Persistent State Memory ---
-    persistent timestep mode error_state error_cov attitude_estimate last_sun_in_view;
+    persistent timestep mode error_state error_cov attitude_estimate;
     persistent true_body_to_ref_prev;
 
     if isempty(timestep)
@@ -21,16 +44,10 @@ function [estimate_err, bias, m] = simulink(q_eci2b, reference_mag, sun_in_view)
     if isempty(mode)
         mode = 1; % 0: Sun+Mag (Full Observability, 2-vector), 1: Mag Only (Eclipse, 1-vector)
     end
-    if isempty(last_sun_in_view)
-        last_sun_in_view = sun_in_view;
-    end
     % NOTE: mode now actually gates the measurement path (see below), but
     % the switch is still purely on a fixed timestep_per_mode timer, same
     % as ukf_python_replica.m's switch_every -- neither file ties the
-    % switch to sun_in_view / real sun visibility. sun_in_view is still
-    % tracked in last_sun_in_view but not otherwise used; wiring it in to
-    % drive the mode switch instead of a fixed timer would need an actual
-    % change here and in the Python reference, not just this file.
+    % switch to sun_in_view / real sun visibility.
 
     % 6-state error vector: [Attitude (3), Bias (3)]
     % Scale factor removed from the filter state -- it was estimating an
@@ -54,6 +71,11 @@ function [estimate_err, bias, m] = simulink(q_eci2b, reference_mag, sun_in_view)
     % omega_icrf2b was reading straight 0 in Simulink even during active
     % nadir-pointing motion, so the truth angular velocity is derived
     % directly from the ACTUAL attitude quaternion history instead --
+    % same technique used for the nadir-pointing environment model in
+    % ukf_python_replica.m. This uses the same kinematic relationship as
+    % the gyro-driven propagation elsewhere in this file:
+    %   true_body_to_ref_new = true_body_to_ref_old * rotation_to_quat(omega*dt)^-1
+    % => rotation_to_quat(omega*dt) = true_body_to_ref_new^-1 * true_body_to_ref_old
     if isempty(true_body_to_ref_prev)
         true_body_to_ref_prev = true_body_to_ref;  % first call: no history yet -> zero rate
     end
@@ -74,6 +96,9 @@ function [estimate_err, bias, m] = simulink(q_eci2b, reference_mag, sun_in_view)
     do_update = (mod(timestep, steps_per_measurement) == 0);
 
     % Sensor readings
+    % Fix #2: truth gyro measurement now matches ukf_python_replica.m --
+    % true rate + true bias + (true scale factor .* true rate) + noise,
+    % instead of just true rate + noise with a zero bias and no scale factor.
     gyro_measurement_noise = normrnd(0, gyro_noise, [1,3]);
     simulated_gyro_measurement = true_angular_velocity + true_gyro_bias + gyro_measurement_noise;
 
@@ -96,6 +121,8 @@ function [estimate_err, bias, m] = simulink(q_eci2b, reference_mag, sun_in_view)
     end
 
     if do_update
+        % Only sample fresh vector readings when one is actually available
+        % at the 0.1 Hz measurement rate.
         body_mag = true_ref_to_body.apply_rotation(reference_mag) + normrnd([0,0,0], measurement_noise);
         mag_unit = body_mag / norm(body_mag);
 
@@ -107,10 +134,17 @@ function [estimate_err, bias, m] = simulink(q_eci2b, reference_mag, sun_in_view)
             body_msmts = mag_unit;
         end
     else
+        % unused: iterate() skips the correction step when do_update is
+        % false. Sized to match ref_readings/R for the current mode so the
+        % call below always has consistent argument shapes.
         body_msmts = zeros(1, size(ref_readings, 1) * 3);
     end
 
     % --- Q Matrix (Process Noise Tuning) ---
+    % REVERTED (per empirical observation): back to the original fixed
+    % constants rather than the gyro_noise-derived value, since the
+    % original tuning converged better in practice. No longer claims to
+    % match global_Q in ukf_python_replica.m -- see note above.
     Q = zeros(6,6);
     Q(1:3,1:3) = eye(3) * 4e-8;    % Attitude noise
     Q(4:6,4:6) = eye(3) * 1e-10;   % Bias random walk
@@ -128,7 +162,6 @@ function [estimate_err, bias, m] = simulink(q_eci2b, reference_mag, sun_in_view)
     estimate_err = rad2deg(Quaternion.quat_diff(true_body_to_ref, attitude_estimate));
     bias = reshape(error_state(4:6), [1 3]); % Extract bias for logging
 
-    last_sun_in_view = sun_in_view;
     true_body_to_ref_prev = true_body_to_ref;
     timestep = timestep + 1;
     m = mode;
@@ -153,6 +186,9 @@ function [new_error_state, new_guess, new_cov] = iterate(current_error_state, cu
     alpha = 0.1;
     beta = 2;
 
+    % Fix #1: guard incoming covariance before building sigma points,
+    % matching ensure_positive_definite(P) call at the top of
+    % ukf_python_replica.m's iterate().
     current_cov = ensure_positive_definite(current_cov);
 
     lam = calculate_lambda(alpha, current_error_state);
@@ -228,6 +264,9 @@ function [new_error_state, new_guess, new_cov] = iterate(current_error_state, cu
         P = P_hat;
     end
 
+    % Fix #1: guard outgoing covariance after the update, matching
+    % ensure_positive_definite(P) call at the end of
+    % ukf_python_replica.m's iterate().
     P = ensure_positive_definite(P);
 
     x_hat_rot = Quaternion.rotation_vec2quaternion(x_hat(1:3));

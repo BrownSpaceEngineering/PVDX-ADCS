@@ -7,13 +7,14 @@
 % RETURN:
 % q_tgtb - (1 x 4): error quaternion, with axis in body coordinates
 %
-function q_tgtb = DownQuaternion(r_eci, v_eci, q_b2eci, providence_eci)
+function q_tgtb = pointing_error(r_eci, v_eci, q_b2eci, providence_eci)
 
     persistent q_want_prev 
     if isempty(q_want_prev)
         q_want_prev = [1 0 0 0];   % initial guess, any unit quaternion
     end
     z_want = providence_eci - r_eci;
+    z_want = z_want / norm(z_want);
 
     y_want = cross(z_want, v_eci);
     y_want = y_want / norm(y_want);

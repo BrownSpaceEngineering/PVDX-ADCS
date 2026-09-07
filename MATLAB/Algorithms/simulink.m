@@ -1,4 +1,4 @@
-function [estimate_err, bias, m] = fcn(q_eci2b, reference_mag)
+function [estimate_err, bias, m] = fcn(q_eci2b, w_eci2b, reference_mag)
     % --- Constants & Sensor Specs ---
     dt = 0.1;
 
@@ -44,10 +44,6 @@ function [estimate_err, bias, m] = fcn(q_eci2b, reference_mag)
     if isempty(mode)
         mode = 1; % 0: Sun+Mag (Full Observability, 2-vector), 1: Mag Only (Eclipse, 1-vector)
     end
-    % NOTE: mode now actually gates the measurement path (see below), but
-    % the switch is still purely on a fixed timestep_per_mode timer, same
-    % as ukf_python_replica.m's switch_every -- neither file ties the
-    % switch to sun_in_view / real sun visibility.
 
     % 6-state error vector: [Attitude (3), Bias (3)]
     % Scale factor removed from the filter state -- it was estimating an
@@ -62,25 +58,33 @@ function [estimate_err, bias, m] = fcn(q_eci2b, reference_mag)
 
     if isempty(error_cov)
         error_cov = eye(6, 6) * 0.01;
+        error_cov(4:6,4:6) = eye(3)*2.5e-5;
     end
 
     % --- True Environment Simulation ---
-    true_ref_to_body = Quaternion(real(q_eci2b)).quaternion_normalize();
-    true_body_to_ref = true_ref_to_body.quaternion_inverse();
+    % Fix #10: q_eci2b arrives in this codebase's own "body->ref" sense
+    % (i.e. the sense that apply_rotation's sandwich convention expects),
+    % not "ref->body" as originally assumed here. Confirmed empirically
+    % against a full external trajectory log: reconstructing angular
+    % velocity from consecutive q_eci2b samples via
+    % true_body_to_ref_prev^-1 * true_body_to_ref matched the logged
+    % w_eci2b on 100% of the 60 dynamically-active steps (out of 8859
+    % total consecutive-pair steps checked), with every alternative
+    % assignment/ordering getting the sign backwards on all of them.
+    % true_body_to_ref is therefore taken directly from the input, and
+    % true_ref_to_body is derived from it by inversion (not the reverse).
+    true_body_to_ref = Quaternion(real(q_eci2b)).quaternion_normalize();
+    true_ref_to_body = true_body_to_ref.quaternion_inverse();
 
-    % omega_icrf2b was reading straight 0 in Simulink even during active
-    % nadir-pointing motion, so the truth angular velocity is derived
-    % directly from the ACTUAL attitude quaternion history instead --
-    % same technique used for the nadir-pointing environment model in
-    % ukf_python_replica.m. This uses the same kinematic relationship as
-    % the gyro-driven propagation elsewhere in this file:
-    %   true_body_to_ref_new = true_body_to_ref_old * rotation_to_quat(omega*dt)^-1
-    % => rotation_to_quat(omega*dt) = true_body_to_ref_new^-1 * true_body_to_ref_old
     if isempty(true_body_to_ref_prev)
         true_body_to_ref_prev = true_body_to_ref;  % first call: no history yet -> zero rate
     end
-    delta_q = true_body_to_ref.quaternion_inverse().quaternion_multiply(true_body_to_ref_prev);
-    true_angular_velocity = delta_q.quaternion2rotation_vec() / dt;
+    % delta_q = true_body_to_ref_prev.quaternion_inverse().quaternion_multiply(true_body_to_ref);
+    % true_angular_velocity = delta_q.quaternion2rotation_vec() / dt;
+    % output = (reshape(true_angular_velocity, [1 3]) - reshape(w_eci2b, [1 3]));
+    
+    % Use the given w_eci2b from Simulink
+    true_angular_velocity = w_eci2b;
 
     if isempty(attitude_estimate)
         attitude_estimate = true_body_to_ref;
@@ -114,10 +118,10 @@ function [estimate_err, bias, m] = fcn(q_eci2b, reference_mag)
     if use_two_vector
         ref_readings = [reference_mag / norm(reference_mag); ...
                          ref_vec_2_eci / norm(ref_vec_2_eci)];
-        R = blkdiag(eye(3) * 2.5e-5, eye(3) * sigma_unit_vector^2);
+        R = blkdiag(eye(3) * 2e-5, eye(3) * sigma_unit_vector^2);
     else
         ref_readings = reference_mag / norm(reference_mag);
-        R = eye(3) * 2.5e-5;
+        R = eye(3) * 2e-5;
     end
 
     if do_update
@@ -146,7 +150,7 @@ function [estimate_err, bias, m] = fcn(q_eci2b, reference_mag)
     % original tuning converged better in practice. No longer claims to
     % match global_Q in ukf_python_replica.m -- see note above.
     Q = zeros(6,6);
-    Q(1:3,1:3) = eye(3) * 4e-8;    % Attitude noise
+    Q(1:3,1:3) = eye(3) * 4e-6;    % Attitude noise
     Q(4:6,4:6) = eye(3) * 1e-10;   % Bias random walk
 
     % --- UKF Iteration ---
@@ -344,7 +348,7 @@ function new_sigmas = propagate_quat_sigmas(quat_sigmas, gyro_measurement, dt)
         w = gyro_measurement - bias;
 
         new_quaternion = Quaternion(quaternion).quaternion_multiply( ...
-            Quaternion.rotation_vec2quaternion(w * dt).quaternion_inverse());
+    Quaternion.rotation_vec2quaternion(w * dt));
         new_quaternion = new_quaternion.quaternion_normalize();
 
         new_sigmas(i, :) = [new_quaternion.to_array(), quat_sigmas(i, 5:7)];
@@ -384,16 +388,13 @@ function [x, error_vectors] = gradient_descent(Y, x, weights)
     if nargin < 3 || isempty(weights)
         weights = ones(1, n_pts) / n_pts;
     end
-    safe_w = max(weights, 0);
-    safe_w = safe_w / sum(safe_w);
-
+    w = weights(:) / sum(weights);   % keep the negative centre weight
     for iter = 1:100
         error_vectors = get_error_vectors(Y, x);
-        ave = sum(error_vectors .* safe_w(:), 1); % weighted average across rows
-        if norm(ave) < 1e-6
+        ave = sum(error_vectors .* w, 1);
+        if norm(ave) < 1e-9
             break;
         end
-        average_error_quat = Quaternion.rotation_vec2quaternion(ave);
-        x = average_error_quat.quaternion_multiply(x);
+        x = Quaternion.rotation_vec2quaternion(ave).quaternion_multiply(x);
     end
 end

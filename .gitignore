@@ -4,3 +4,29 @@
 *.DS_Store
 **/codegen/
 *.xml
+
+
+work/
+slprj/
+codegen/
+*.slxc
+
+# MATLAB autosave and version-upgrade backups
+*.asv
+*.autosave
+*.slx.original
+*.mdl.original
+*.slx.r20*
+*.mdl.r20*
+
+# Compiled MATLAB
+*.mex*
+*.p
+
+# ─── OS clutter ───────────────────────────────────────────────────
+._*
+Thumbs.db
+
+#SDI exports
+results/
+*.mldatx

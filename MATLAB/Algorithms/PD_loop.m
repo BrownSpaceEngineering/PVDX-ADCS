@@ -27,7 +27,6 @@ function tau = PD_loop(omega, q_error)
         axis = [0; 0; 0];
     end
     r_e = [axis; angle];
-
     % Convert 3x1 error omega vector back to axis-angle
     omega_rad = omega * (pi/180); % omega is in deg/s. converting to rad/s
     omega_mag = norm(omega_rad);
@@ -41,9 +40,10 @@ function tau = PD_loop(omega, q_error)
     r_omega = [omega_axis; omega_mag];
 
     % PD controller
-    Kp0 = 0.030;
+    Kp0 = 0.034;
     Kd0 = 0.42;
     max_tau = 5;
+    min_tau = -5;
     I_body = [3.0054115e-02, -5.1674000e-05, 2.5075000e-05 ;-5.1674000e-05, 1.1430611e-02, -3.6481690e-03 ;2.5075000e-05, -3.6481690e-03, 2.3052295e-02];
     
     Kp = [Kp0, Kp0, Kp0];
@@ -56,5 +56,5 @@ function tau = PD_loop(omega, q_error)
         tau(i) = Pi - Di;
     end
     tau = I_body * tau;
-    tau = min(tau, max_tau);
+    tau = max(min(tau, max_tau), min_tau);
 end

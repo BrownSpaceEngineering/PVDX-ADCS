@@ -2,13 +2,12 @@
 % r_eci - (3 x 1): ECI coordinates of satellite position
 % v_eci - (3 x 1): ECI velocity of sattelite position
 % q_b2eci - (1 x 4): quaternion of current orientation in ECI to BODY frame
-% providence_eci - (3 x 1): ECI coordinates of Providence, Rhode Island
+% providence_eci - (1 x 3): ECI coordinates of Providence, Rhode Island
 %
 % RETURN:
 % q_tgtb - (1 x 4): error quaternion, with axis in body coordinates
 %
-function q_tgtb = pointing_error(r_eci, v_eci, q_b2eci, providence_eci)
-
+function [q_tgtb, z_want] = pointing_error(r_eci, v_eci, q_b2eci, providence_eci)
     persistent q_want_prev 
     if isempty(q_want_prev)
         q_want_prev = [1 0 0 0];   % initial guess, any unit quaternion

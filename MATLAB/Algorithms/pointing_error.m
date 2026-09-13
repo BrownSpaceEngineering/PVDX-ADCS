@@ -1,7 +1,7 @@
 % INPUTS:
 % r_eci - (3 x 1): ECI coordinates of satellite position
-% v_eci - (3 x 1): ECI velocity of sattelite position
-% q_b2eci - (1 x 4): quaternion of current orientation in ECI to BODY frame
+% v_eci - (3 x 1): ECI velocity of satellite position
+% q_b2eci - (1 x 4): quaternion of current orientation in body to eci,ACTIVE convention
 % providence_eci - (1 x 3): ECI coordinates of Providence, Rhode Island
 %
 % RETURN:
@@ -29,7 +29,7 @@ function [q_tgtb, z_want] = pointing_error(r_eci, v_eci, q_b2eci, providence_eci
     end
     q_want_prev = q_want_eci;   % store for next timestep
    
-    q_tgtb = quatmultiply(q_b2eci, q_want_eci);
+    q_tgtb = quatmultiply(quatinv(q_b2eci), q_want_eci);
   
 end
 

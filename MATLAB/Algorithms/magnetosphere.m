@@ -1,4 +1,4 @@
-%NOTE: I do not truly understand this algorithm, but it seems to work and
+% NOTE: I do not truly understand this algorithm, but it seems to work and
 % gives accurate results with the example cases
 
 function B_ECI = wmmECI_embedded(r_ECI, JD)
@@ -9,7 +9,7 @@ function B_ECI = wmmECI_embedded(r_ECI, JD)
 %   JD    - Julian Date
 %
 % Output:
-%   B_ECI - [3x1] magnetic field in Tesla (ECI)
+%   B_ECI - [3x1] magnetic field in nT (ECI)
 %
 % Reference: NOAA WMM2025 (epoch 2025.0)
 % --- Convert Julian date to decimal year (keep for potential use) ---
@@ -153,27 +153,14 @@ function B_ECI = computeWMMfieldFromCoeffs_manual(r_ECI, g, h, jd)
 
     r_ecef = Rz * r_ECI(:);
 
-    utc = datetime('now','TimeZone','UTC');
-    [r_eci_test] = ecef2eci(utc,r_ecef);
+  
 
     % ECEF -> geodetic (WGS84)
     [lat, lon, alt] = ecef2geodetic(r_ecef);
-    ecef = lla2ecef([rad2deg(lat), rad2deg(lon), alt]);
     
     % Synthesize magnetic field in NED (nT)
     [B_north, B_east, B_down] = synthesizeMagField_manual(lat, lon, alt, g, h);
 
-    % Test with Matlab's script
-    lat_deg = rad2deg(lat); 
-    lon_deg = rad2deg(lon);
-    [XYZ] = wrldmagm(alt, lat_deg, lon_deg, decyear(2025,11,16),'2025');
-
-    fprintf('Matlab NED Vector (Correct magnetic field): [%.4e, %.4e, %.4e]\n', XYZ(1), XYZ(2), XYZ(3));
-    fprintf('Our NED Vector: [%.4e, %.4e, %.4e]\n', B_north, B_east, B_down);
-    accuracy = dot([XYZ(1), XYZ(2), XYZ(3)]/norm([XYZ(1), XYZ(2), XYZ(3)]), [B_north, B_east, B_down]/norm([B_north, B_east, B_down]));
-    angle_error_deg = rad2deg(acos(accuracy));
-    fprintf('Our accuracy: %f\n', accuracy);
-    fprintf('Our angular error (degrees): %f\n', angle_error_deg);
     % NED -> ECEF (NED vector to ECEF vector)
     R_ned2ecef = [ -sin(lat)*cos(lon), -sin(lat)*sin(lon),  cos(lat);
                    -sin(lon),            cos(lon),           0;
@@ -181,7 +168,41 @@ function B_ECI = computeWMMfieldFromCoeffs_manual(r_ECI, g, h, jd)
     B_ecef = R_ned2ecef * [B_north; B_east; B_down];
     
     B_ECI = Rz' * B_ecef;    % still in nT
-    B_ECI = B_ECI * 1e-9;    % convert nT -> T
+end
+%% ---------------------- Decyear -------------------------------------
+function dyear = decyear_cg(year, month, day, hour, minute, second)
+%DECYEAR_CG Codegen-compatible decimal year calculation
+%   dyear = decyear_cg(year, month, day, hour, minute, second)
+%   Equivalent to MATLAB's decyear(), but usable in code generation.
+
+    if nargin < 6, second = 0; end
+    if nargin < 5, minute = 0; end
+    if nargin < 4, hour   = 0; end
+
+    % Days in each month (non-leap year baseline)
+    daysInMonth = [31 28 31 30 31 30 31 31 30 31 30 31];
+
+    % Leap year check (Gregorian rule)
+    isLeap = (mod(year,4)==0 && mod(year,100)~=0) || (mod(year,400)==0);
+    if isLeap
+        daysInMonth(2) = 29;
+    end
+
+    % Total days in the year
+    if isLeap
+        totalDays = 366;
+    else
+        totalDays = 365;
+    end
+
+    % Day of year (integer part)
+    dayOfYear = sum(daysInMonth(1:month-1)) + day;
+
+    % Fractional day from time-of-day
+    fracDay = (hour + minute/60 + second/3600) / 24;
+
+    % Decimal year
+    dyear = year + (dayOfYear - 1 + fracDay) / totalDays;
 end
 
 %% ---------------------- Julian -> decimal year ----------------------
@@ -399,78 +420,4 @@ function [B_N, B_E, B_D] = synthesizeMagField_manual(lat, lon, alt, g, h)
     B_E = B_Y_geo; % East is invariant to latitude rotation
     B_D = B_X_geo * sin(psi) + B_Z_geo * cos(psi);
     % Return nT components
-end
-
-% --- TEST CASES ---
-utcNow = datetime('now','TimeZone','UTC');
-jd = juliandate(utcNow);
-fprintf('Our Julian Day: [%f]\n', jd);
-
-% Define Test Cases (All units in Meters)
-tests = [
-    % 1. SAA CENTER (The Danger Zone)
-    % Location: ~30°S, 40°W (South Atlantic Anomaly). Weakest field, high radiation.
-    struct('name', 'SAA Center', 'r', [4.5e6; -3.7e6; -3.4e6]),
-
-    % 2. ISS ORBIT MAX LATITUDE
-    % Location: 51.6°N, 0°E. The highest latitude a standard ISS-deployed CubeSat reaches.
-    struct('name', 'ISS Max Lat', 'r', [4.2e6; 0; 5.3e6]),
-
-    % 3. MAGNETIC NORTH POLE (Approx)
-    % Location: High Arctic (~85°N). Field lines point straight down (-Z).
-    struct('name', 'Mag N Pole', 'r', [0.5e6; 0; 6.75e6]),
-
-    % 4. MAGNETIC SOUTH POLE (Approx)
-    % Location: Off the coast of Antarctica (~65°S, 135°E). Field lines point straight up (+Z).
-    struct('name', 'Mag S Pole', 'r', [-2.0e6; 2.0e6; -6.1e6]),
-
-    % 5. THE "TERMINATOR" (Equatorial Crossing)
-    % Location: 0°N, 90°E (Indian Ocean). Simple check for horizontal field lines.
-    struct('name', 'Eq 90 deg E', 'r', [0; 6.77e6; 0]),
-
-    % 6. BERMUDA (North Atlantic)
-    % Location: ~30°N, 65°W. A standard mid-latitude verification point.
-    struct('name', 'Bermuda',   'r', [2.5e6; -5.3e6; 3.4e6]),
-
-    % 7. PACIFIC "VOID"
-    % Location: 0°N, 180°E. The middle of the Pacific. Good for checking sign flips on Longitude.
-    struct('name', 'Pacific 180', 'r', [-6.77e6; 0; 0]),
-
-    % 8. 45-DEGREE TEST
-    % Location: 45°N, 45°E. X, Y, and Z coords are roughly equal magnitude. 
-    % Good for checking matrix mixing errors.
-    struct('name', '45N 45E',     'r', [3.4e6; 3.4e6; 4.8e6]),
-
-    % 9. POLAR ORBIT (Sun-Synchronous)
-    % Location: 98° Inclination crossing the equator. (Actually, let's do high lat 80°S).
-    % Many CubeSats use SSO orbits.
-    struct('name', 'SSO Polar',   'r', [1.1e6; 0; -6.6e6]),
-
-    % 10. VANDENBERG LAUNCH SITE
-    % Location: 34°N, 120°W (California). Common launch site for polar CubeSats.
-    struct('name', 'Vandenberg',  'r', [-2.8e6; -4.8e6; 3.8e6])
-];
-
-% --- EXECUTION LOOP ---
-fprintf('----------------------------------------------------------------\n');
-fprintf('%-15s | %-12s | %-30s\n', 'Test Name', 'Input Mag', 'Output B_ECI [Bx, By, Bz] (nT)');
-fprintf('----------------------------------------------------------------\n');
-
-for i = 1:length(tests)
-    r_check = tests(i).r;
-    
-    % Run your function
-    B_vec = wmmECI_embedded(r_check, jd);
-    
-    % Calculate Magnitude for quick check
-    B_mag = norm(B_vec)*10^9;
-    
-    fprintf('Our Starting ECI position: [%.4e, %.4e, %.4e]\n', r_check);
-    % Print results
-    fprintf('%-15s | %6.0f km   | [%8.1f, %8.1f, %8.1f] (Total: %.1f nT)\n', ...
-        tests(i).name, ...
-        norm(r_check)/1000, ...
-        B_vec(1)*10^9, B_vec(2)*10^9, B_vec(3)*10^9, B_mag);
-    fprintf('----------------------------------------------------------------\n');
-
 end

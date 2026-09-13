@@ -1,4 +1,19 @@
-function [estimate_err, bias, m] = fcn(q_eci2b, w_eci2b, reference_mag)
+
+%INPUTS:
+% ACTIVE CONVENTION means q_b2eci * v * q_b2eci^-1 rotates v, NOT
+% q_b2eci^-1 * v * q_b2eci. Note: MATLAB/SIMULINK uses passive convention.
+% q_b2eci - quaternion in Body to ECI, active convention, scalar first
+% w_eci2b - angular velocity w/r to eci, written in body coordinates
+% refrence_mag - magnetic field in eci coordinates, nT
+% sun_eci - sun vector UNIT in eci coordinates
+
+% OUTPUTS
+% estimate_err_body - angle-error vector (Degrees, body frame) between guess quaternion and true quaternion  
+% deg_error - total angle error between guess quaternion and true quaternion
+% q_est - estimated q_b2eci (active convention still)
+% w_est - estimated w_eci2b
+
+function [estimate_err_body, deg_error, w_est, q_est, bias, bias_error, m] = fcn(q_b2eci, w_eci2b, reference_mag, sun_eci)
     % --- Constants & Sensor Specs ---
     dt = 0.1;
 
@@ -29,7 +44,7 @@ function [estimate_err, bias, m] = fcn(q_eci2b, w_eci2b, reference_mag)
     % ukf_python_replica.m) -- NOT read from an actual sun sensor/ephemeris
     % yet. Swap this out for a real ECI sun vector once one is wired into
     % this block as an input.
-    ref_vec_2_eci = [1, 0, 0];
+    ref_vec_2_eci = sun_eci;
     sigma_unit_vector = 0.01;   % second-vector sensor noise std, matches ukf_python_replica.m
 
     reference_mag = reshape(reference_mag/1000, [1,3]); % nT -> uT
@@ -42,7 +57,7 @@ function [estimate_err, bias, m] = fcn(q_eci2b, w_eci2b, reference_mag)
         timestep = 0;
     end
     if isempty(mode)
-        mode = 1; % 0: Sun+Mag (Full Observability, 2-vector), 1: Mag Only (Eclipse, 1-vector)
+        mode = 0; % 0: Sun+Mag (Full Observability, 2-vector), 1: Mag Only (Eclipse, 1-vector)
     end
 
     % 6-state error vector: [Attitude (3), Bias (3)]
@@ -73,7 +88,7 @@ function [estimate_err, bias, m] = fcn(q_eci2b, w_eci2b, reference_mag)
     % assignment/ordering getting the sign backwards on all of them.
     % true_body_to_ref is therefore taken directly from the input, and
     % true_ref_to_body is derived from it by inversion (not the reverse).
-    true_body_to_ref = Quaternion(real(q_eci2b)).quaternion_normalize();
+    true_body_to_ref = Quaternion(real(q_b2eci)).quaternion_normalize();
     true_ref_to_body = true_body_to_ref.quaternion_inverse();
 
     if isempty(true_body_to_ref_prev)
@@ -163,13 +178,19 @@ function [estimate_err, bias, m] = fcn(q_eci2b, w_eci2b, reference_mag)
     error_state(1:3) = [0 0 0];
 
     % --- Outputs & Loop Maintenance ---
-    estimate_err = rad2deg(Quaternion.quat_diff(true_body_to_ref, attitude_estimate));
+    estimate_err_body = rad2deg(Quaternion.quat_diff(true_ref_to_body, attitude_estimate.quaternion_inverse()));
+    q_est = attitude_estimate.to_array();
+    deg_error = norm(estimate_err_body);
     bias = reshape(error_state(4:6), [1 3]); % Extract bias for logging
+    bias_error_vector = true_gyro_bias - bias;
+    bias_error = rad2deg(norm(bias_error_vector));
+    
+    w_est = simulated_gyro_measurement - bias;
 
     true_body_to_ref_prev = true_body_to_ref;
     timestep = timestep + 1;
     m = mode;
-
+   
     if(mod(timestep, timestep_per_mode) == 0)
         if(mode == 1)
             mode = 0;
@@ -177,6 +198,7 @@ function [estimate_err, bias, m] = fcn(q_eci2b, w_eci2b, reference_mag)
             mode = 1;
         end
     end
+   
 end
 
 % =========================================================================
@@ -187,7 +209,7 @@ function [new_error_state, new_guess, new_cov] = iterate(current_error_state, cu
     ref_readings, body_msmts, gyro, Q, R, dt, do_update)
 
     n = length(current_error_state); % 6-state filter (attitude + bias)
-    alpha = 0.1;
+    alpha = 1;
     beta = 2;
 
     % Fix #1: guard incoming covariance before building sigma points,
